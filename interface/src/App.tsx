@@ -1,22 +1,43 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Account,
+  AccountAddressInput,
   Aptos,
   AptosConfig,
-  InputGenerateTransactionPayloadData,
+  Hex,
   Network,
-  NetworkToNetworkName,
-  UserTransactionResponse,
-  TransactionWorkerEventsEnum,
 } from "@aptos-labs/ts-sdk";
+import {  
+  NetworkName,
+  InputTransactionData,
+  WalletName,
+  Wallet,
+  useWallet,
+} from "@aptos-labs/wallet-adapter-react";
 import { WalletSelector } from "@aptos-labs/wallet-adapter-ant-design";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
+import "@aptos-labs/wallet-adapter-ant-design/dist/index.css";
 import styled from 'styled-components';
 
 const aptosConfig = new AptosConfig({ network: Network.TESTNET });
-const aptos = new Aptos(aptosConfig);
+const client = new Aptos(aptosConfig);
 
 const moduleAddress = "0xa1f27853ed078768afd4edbaa401e6f644a82cc04f797a6fd7d67c3fda98efe4";
+
+const WindowWrapper = styled.div`
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  background-color: #f0f0f0;
+`;
+
+const WalletWrapper = styled.div`
+  position: absolute;
+  align-items: right;
+  right: 10px;
+  top: 10px;
+  background-color: #f0f0f0;
+`;
 
 const CenteredWrapper = styled.div`
   display: flex;
@@ -90,7 +111,11 @@ const App: React.FC = () => {
   const [input, setInput] = useState<string>('');
   const [result, setResult] = useState<string>('');
   const [isActive, setIsActive] = useState<boolean>(false);
-  const { account } = useWallet();
+  const { 
+    account,
+    connected,
+    signAndSubmitTransaction } = useWallet();
+  const [transactionInProgress, setTransactionInProgress] = useState<boolean>(false);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -119,69 +144,132 @@ const App: React.FC = () => {
   };
 
   const handleOperationClick = async (operation: string) => {
-    const [num1, operator, num2] = input.split(' ');
-    if (!num1 || !num2 || !operator) return;
+    if (operation === '=') {
+      const [num1, operator, num2] = input.split(' ');
+      if (!num1 || !num2 || !operator) return;
 
-    try {
-      if (!account) return;
-      const transaction = await aptos.transaction.build.simple({
-        sender: account?.address,
+      let functionName = '';
+      switch (operator) {
+        case '+':
+          functionName = 'add';
+          break;
+        case '-':
+          functionName = 'subtract';
+          break;
+        case '*':
+          functionName = 'multiply';
+          break;
+        case '/':
+          functionName = 'divide';
+          break;
+        case '^':
+          functionName = 'power';
+          break;
+        default:
+          return;
+      }
+
+      try {
+        if (!account) return;
+
+        setTransactionInProgress(true);
+
+        const payload: InputTransactionData = {
+          data: {
+            function: `${moduleAddress}::calculator::${functionName}`,
+            functionArguments: [num1, num2],
+          }
+        };
+
+        const response = await signAndSubmitTransaction(payload);
+
+        console.log(response);
+
+        const resultData = await client.getAccountResource({
+          accountAddress: account?.address,
+          resourceType: `${moduleAddress}::calculator::Calculator`
+        });
+
+        console.log(resultData);
+        setResult(resultData.result.toString());
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setTransactionInProgress(false);
+      }
+    } else {
+      setInput(input + ` ${operation} `);
+    }
+  }
+
+  const toggleActiveState = async () => {
+    setIsActive(!isActive);
+    if (!account) return;
+    if (!isActive) {
+      console.log('Toggling active state: ' + isActive);
+      const payload: InputTransactionData = {
         data: {
-          function: `${moduleAddress}::calculator::${operation}`,
-          typeArguments: [],
-          functionArguments: [num1, num2],
-        },
-      });
+          function: `${moduleAddress}::calculator::create_calculator`,
+          functionArguments: [],
+        }
+      };
 
-      // using signAndSubmit combined
-      // const pendingTransaction = await aptos.signAndSubmitTransaction({
-      //   signer: account?.address,
-      //   transaction,
-      // });
-      // console.log(pendingTransaction);
-
-      // const result = (await pendingTransaction.hash()).toString();
-      // setResult(result);
-    } catch (error) {
-      console.error(error);
+      const response = await signAndSubmitTransaction(payload);
+      console.log(response);
     }
   };
 
-  const toggleActiveState = () => {
-    setIsActive(!isActive);
+  const connectedView = () => {
+    return (
+      <CenteredWrapper>
+        <ToggleButton active={isActive} onClick={toggleActiveState}>
+          {isActive ? 'Turn Off' : 'Turn On'}
+        </ToggleButton>
+        <CalculatorWrapper>
+          {!result && <Display>{input || '0'}</Display>}
+          {result && <Display>{result}</Display>}
+          <ButtonGrid>
+            <Button color="#FF6663" onClick={() => setInput('')} disabled={!isActive}>C</Button>
+            <Button color="#FFB399" onClick={() => setInput(input.slice(0, -1))} disabled={!isActive}>←</Button>
+            {/* <Button color="#FF33FF" onClick={() => setInput(input + '  ')} disabled={!isActive}>^</Button> */}
+            <OperationButton onClick={() => handleOperationClick('^')} disabled={!isActive}>^</OperationButton>
+            <OperationButton onClick={() => handleOperationClick('/')} disabled={!isActive}>÷</OperationButton>
+            {[7, 8, 9].map(num => (
+              <Button key={num} color="#FFFF99" onClick={() => handleButtonClick(num.toString())} disabled={!isActive}>{num}</Button>
+            ))}
+            <OperationButton onClick={() => handleOperationClick('*')} disabled={!isActive}>x</OperationButton>
+            {[4, 5, 6].map(num => (
+              <Button key={num} color="#FFCC99" onClick={() => handleButtonClick(num.toString())} disabled={!isActive}>{num}</Button>
+            ))}
+            <OperationButton onClick={() => handleOperationClick('-')} disabled={!isActive}>-</OperationButton>
+            {[1, 2, 3].map(num => (
+              <Button key={num} color="#99FF99" onClick={() => handleButtonClick(num.toString())} disabled={!isActive}>{num}</Button>
+            ))}
+            <OperationButton onClick={() => handleOperationClick('+')} disabled={!isActive}>+</OperationButton>
+            <Button wide color="#FF6663" onClick={() => handleButtonClick('0')} disabled={!isActive}>0</Button>
+            <Button color="#66B2FF" onClick={() => handleButtonClick('.')} disabled={!isActive}>.</Button>
+            <OperationButton onClick={() => handleOperationClick('=')} disabled={!isActive || transactionInProgress}>=</OperationButton>
+          </ButtonGrid>
+        </CalculatorWrapper>
+      </CenteredWrapper>
+    );
+  };
+
+  const notConnectedView = () => {
+    return (
+      <WindowWrapper>
+        <h1>Please connect your wallet to continue</h1>
+      </WindowWrapper>
+    );
   };
 
   return (
-    <CenteredWrapper>
-      <ToggleButton active={isActive} onClick={toggleActiveState}>
-        {isActive ? 'Turn Off' : 'Turn On'}
-      </ToggleButton>
-      <CalculatorWrapper>
-        <Display>{input || '0'}</Display>
-        <ButtonGrid>
-          <Button color="#FF6663" onClick={() => setInput('')} disabled={!isActive}>C</Button>
-          <Button color="#FFB399" onClick={() => setInput(input.slice(0, -1))} disabled={!isActive}>←</Button>
-          <Button color="#FF33FF" onClick={() => setInput(input + '**')} disabled={!isActive}>^</Button>
-          <OperationButton onClick={() => setInput(input + ' / ')} disabled={!isActive}>÷</OperationButton>
-          {[7, 8, 9].map(num => (
-            <Button key={num} color="#FFFF99" onClick={() => handleButtonClick(num.toString())} disabled={!isActive}>{num}</Button>
-          ))}
-          <OperationButton onClick={() => setInput(input + ' * ')} disabled={!isActive}>x</OperationButton>
-          {[4, 5, 6].map(num => (
-            <Button key={num} color="#FFCC99" onClick={() => handleButtonClick(num.toString())} disabled={!isActive}>{num}</Button>
-          ))}
-          <OperationButton onClick={() => setInput(input + ' - ')} disabled={!isActive}>-</OperationButton>
-          {[1, 2, 3].map(num => (
-            <Button key={num} color="#99FF99" onClick={() => handleButtonClick(num.toString())} disabled={!isActive}>{num}</Button>
-          ))}
-          <OperationButton onClick={() => setInput(input + ' + ')} disabled={!isActive}>+</OperationButton>
-          <Button wide color="#FF6663" onClick={() => handleButtonClick('0')} disabled={!isActive}>0</Button>
-          <Button color="#66B2FF" onClick={() => handleButtonClick('.')} disabled={!isActive}>.</Button>
-          <OperationButton onClick={() => handleOperationClick('=')} disabled={!isActive}>=</OperationButton>
-        </ButtonGrid>
-        {result && <Display>Result: {result}</Display>}
-      </CalculatorWrapper>
-    </CenteredWrapper>
+      <WindowWrapper>
+        <WalletWrapper>
+          <WalletSelector />
+      </WalletWrapper>
+        {connected ? connectedView() : notConnectedView()}
+      </WindowWrapper>
   );
 };
 
