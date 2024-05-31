@@ -229,7 +229,7 @@ const App: React.FC = () => {
           {!result && <Display>{input || '0'}</Display>}
           {result && <Display>{result}</Display>}
           <ButtonGrid>
-            <Button color="#FF6663" onClick={() => setInput('')} disabled={!isActive}>C</Button>
+            <Button color="#FF6663" onClick={() => { setInput(''); setResult(''); }} disabled={!isActive}>C</Button>
             <Button color="#FFB399" onClick={() => setInput(input.slice(0, -1))} disabled={!isActive}>←</Button>
             {/* <Button color="#FF33FF" onClick={() => setInput(input + '  ')} disabled={!isActive}>^</Button> */}
             <OperationButton onClick={() => handleOperationClick('^')} disabled={!isActive}>^</OperationButton>
